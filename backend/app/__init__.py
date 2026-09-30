@@ -1,0 +1,1 @@
+"""ClinicalPulse FastAPI application package."""

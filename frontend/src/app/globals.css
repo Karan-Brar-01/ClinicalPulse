@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #071018;
+  --panel: rgba(19, 37, 54, 0.72);
+  --line: rgba(168, 184, 199, 0.14);
+  --text: #e8eef3;
+  --muted: #6b7f92;
+  --accent: #3db8a0;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  color: var(--text);
+  background:
+    radial-gradient(ellipse 90% 55% at 10% -10%, rgba(61, 184, 160, 0.16), transparent 55%),
+    radial-gradient(ellipse 70% 45% at 100% 0%, rgba(42, 70, 96, 0.45), transparent 50%),
+    linear-gradient(180deg, #0a1520 0%, #071018 45%, #050d14 100%);
+}
+
+@layer components {
+  .cp-shell {
+    @apply mx-auto min-h-screen w-full max-w-5xl px-4 py-6 sm:px-6 sm:py-8;
+  }
+
+  .cp-panel {
+    @apply rounded-3xl border border-white/10 bg-ink-800/60 shadow-soft backdrop-blur-xl;
+  }
+
+  .cp-badge {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-sea-400/25
+      bg-sea-500/10 px-3 py-1 text-[11px] font-medium tracking-wide text-sea-300;
+  }
+
+  .cp-btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-2xl bg-sea-400 px-5 py-3
+      text-sm font-semibold text-ink-950 transition hover:bg-sea-300
+      disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .cp-btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10
+      bg-white/5 px-5 py-3 text-sm font-medium text-mist-100 transition
+      hover:border-sea-400/40 hover:bg-white/10 disabled:opacity-40;
+  }
+
+  .cp-input {
+    @apply w-full rounded-2xl border border-white/10 bg-ink-950/70 px-4 py-3 text-sm
+      text-mist-100 outline-none transition placeholder:text-mist-500
+      focus:border-sea-400/50 focus:ring-2 focus:ring-sea-400/20;
+  }
+}
+
+/* Prefer comfortable chat scrolling */
+.cp-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(61, 184, 160, 0.35) transparent;
+}
