@@ -1,4 +1,8 @@
-This is a [Next.js](https://nextjs.org/) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# ClinicalPulse
+
+ClinicalPulse is a pre-clinical triage platform with conversational intake, optical vitals, cough acoustics, and a clinician command center.
+
+The frontend is built with [Next.js](https://nextjs.org/).
 
 ## Getting Started
 
