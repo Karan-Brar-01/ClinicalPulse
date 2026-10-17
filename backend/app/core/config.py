@@ -28,6 +28,7 @@ class Settings(BaseSettings):
 
     app_name: str = "ClinicalPulse API"
     debug: bool = False
+    cors_origins: str = ""
 
 
 @lru_cache

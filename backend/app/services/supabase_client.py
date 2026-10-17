@@ -8,8 +8,34 @@ from typing import Any, Dict, List, Optional
 from fastapi import HTTPException, status
 
 from app.core.config import Settings, get_settings
+from app.services.local_store import (
+    local_get_consultation,
+    local_insert_consultation,
+    local_list_consultations,
+    local_update_consultation,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _is_network_or_connection_error(exc: Exception) -> bool:
+    """Check if exception is caused by DNS resolution, network outage, or connection error."""
+    msg = str(exc).lower()
+    return any(
+        token in msg
+        for token in (
+            "nodename nor servname",
+            "not known",
+            "nxdomain",
+            "connecterror",
+            "connection refused",
+            "name resolution",
+            "failed to establish a new connection",
+            "network is unreachable",
+            "getaddrinfo failed",
+            "timeout",
+        )
+    )
 
 
 def get_supabase_client(settings: Optional[Settings] = None) -> Any:
@@ -40,26 +66,38 @@ def list_consultations(
     limit: int = 50,
 ) -> List[Dict[str, Any]]:
     """List consultations, optionally filtered by status (newest first)."""
-    client = get_supabase_client()
-    query = client.table("consultations").select("*")
-    if status_filter:
-        # Support comma-separated statuses for queue views
-        statuses = [s.strip() for s in status_filter.split(",") if s.strip()]
-        if len(statuses) == 1:
-            query = query.eq("status", statuses[0])
-        elif statuses:
-            query = query.in_("status", statuses)
     try:
+        client = get_supabase_client()
+        query = client.table("consultations").select("*")
+        if status_filter:
+            # Support comma-separated statuses for queue views
+            statuses = [s.strip() for s in status_filter.split(",") if s.strip()]
+            if len(statuses) == 1:
+                query = query.eq("status", statuses[0])
+            elif statuses:
+                query = query.in_("status", statuses)
         response = query.order("created_at", desc=True).limit(limit).execute()
+        return list(getattr(response, "data", None) or [])
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_503_SERVICE_UNAVAILABLE:
+            logger.warning("Supabase unconfigured. Falling back to local storage.")
+            return local_list_consultations(status_filter=status_filter, limit=limit)
+        raise
     except Exception as exc:  # noqa: BLE001
+        if _is_network_or_connection_error(exc):
+            logger.warning(
+                "Supabase unreachable (%s). Falling back to local storage.",
+                exc,
+            )
+            return local_list_consultations(status_filter=status_filter, limit=limit)
         _raise_supabase_error(exc, action="list consultations")
-    return list(getattr(response, "data", None) or [])
+    return []
 
 
 def get_consultation(consultation_id: str) -> Dict[str, Any]:
     """Fetch a consultation by id."""
-    client = get_supabase_client()
     try:
+        client = get_supabase_client()
         response = (
             client.table("consultations")
             .select("*")
@@ -67,55 +105,112 @@ def get_consultation(consultation_id: str) -> Dict[str, Any]:
             .limit(1)
             .execute()
         )
+        data = getattr(response, "data", None) or []
+        if data:
+            return data[0]
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_503_SERVICE_UNAVAILABLE:
+            local = local_get_consultation(consultation_id)
+            if local:
+                return local
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Consultation {consultation_id} not found",
+            ) from exc
+        raise
     except Exception as exc:  # noqa: BLE001
+        if _is_network_or_connection_error(exc):
+            local = local_get_consultation(consultation_id)
+            if local:
+                return local
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Consultation {consultation_id} not found in local store",
+            ) from exc
         _raise_supabase_error(exc, action="get consultation")
-    data = getattr(response, "data", None) or []
-    if not data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Consultation {consultation_id} not found",
-        )
-    return data[0]
+
+    # If Supabase query returned no data, check local store as fallback
+    local = local_get_consultation(consultation_id)
+    if local:
+        return local
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"Consultation {consultation_id} not found",
+    )
 
 
 def update_consultation(consultation_id: str, patch: Dict[str, Any]) -> Dict[str, Any]:
     """Patch a consultation and return the updated row."""
-    client = get_supabase_client()
     try:
+        client = get_supabase_client()
         response = (
             client.table("consultations")
             .update(patch)
             .eq("id", consultation_id)
             .execute()
         )
+        data = getattr(response, "data", None) or []
+        if data:
+            return data[0]
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_503_SERVICE_UNAVAILABLE:
+            updated = local_update_consultation(consultation_id, patch)
+            if updated:
+                return updated
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Consultation {consultation_id} not found in local store",
+            ) from exc
+        raise
     except Exception as exc:  # noqa: BLE001
+        if _is_network_or_connection_error(exc):
+            logger.warning(
+                "Supabase unreachable (%s). Updating in local storage.",
+                exc,
+            )
+            updated = local_update_consultation(consultation_id, patch)
+            if updated:
+                return updated
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Consultation {consultation_id} not found in local store",
+            ) from exc
         _raise_supabase_error(exc, action="update consultation")
-    data = getattr(response, "data", None) or []
-    if not data:
-        # Distinguish missing vs empty update
-        get_consultation(consultation_id)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Failed to update consultation record",
-        )
-    return data[0]
+
+    local_updated = local_update_consultation(consultation_id, patch)
+    if local_updated:
+        return local_updated
+    raise HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail="Failed to update consultation record",
+    )
 
 
 def insert_consultation(row: Dict[str, Any]) -> Dict[str, Any]:
     """Insert a consultations row and return the created record."""
-    client = get_supabase_client()
     try:
+        client = get_supabase_client()
         response = client.table("consultations").insert(row).execute()
+        data = getattr(response, "data", None) or []
+        if data:
+            return data[0]
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_503_SERVICE_UNAVAILABLE:
+            logger.warning("Supabase unconfigured. Persisting consultation locally.")
+            return local_insert_consultation(row)
+        raise
     except Exception as exc:  # noqa: BLE001
+        if _is_network_or_connection_error(exc):
+            logger.warning(
+                "Supabase unreachable (%s). Persisting consultation locally.",
+                exc,
+            )
+            return local_insert_consultation(row)
         _raise_supabase_error(exc, action="insert consultation")
-    data = getattr(response, "data", None) or []
-    if not data:
-        logger.error("Supabase insert returned no data: %s", response)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Failed to create consultation record",
-        )
-    return data[0]
+
+    # If Supabase gave empty response data, persist locally
+    logger.warning("Supabase returned empty data on insert. Saving locally.")
+    return local_insert_consultation(row)
 
 
 def _raise_supabase_error(exc: Exception, *, action: str) -> None:
